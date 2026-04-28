@@ -49,6 +49,7 @@ def get_config():
     config.trainset_size = 65536
     config.testset_size = 8192
     config.res_seq_reverse = True
+    config.dataset_dir = "./cache/cotmulseqdata"
 
     # Model settings
     config.num_embeddings = 32
