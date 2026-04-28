@@ -3,6 +3,7 @@ import numpy as np
 import typing as tp
 import os
 import pickle
+import jax
 import jax.numpy as jnp
 
 
@@ -83,7 +84,7 @@ def MakeSeq(max_len: int, a: int, b: int, config: TokenConfig) -> tuple[list[int
     )
 
 
-def BuildCotMulSeqData(config: TokenConfig, num_digits: int, seq_len: int, nums: np.ndarray):
+def BuildCotMulSeqData(config: TokenConfig, seq_len: int, nums: np.ndarray):
     x = np.full((nums.shape[0], seq_len), config.padding_token, dtype=np.int32)
     y = np.full((nums.shape[0], seq_len), config.padding_token, dtype=np.int32)
 
@@ -97,7 +98,6 @@ def TryLoad(
     x_path: str,
     y_path: str,
     metadata_path: str,
-    metadata: CotMulSeqDataMetaData,
     data_count: int,
     config: TokenConfig,
     seq_len: int,
@@ -116,41 +116,24 @@ def TryLoad(
     return None
 
 
-def LoadCotMulSeqDataset(
-    dataset_folder: str,
-    config: TokenConfig,
-    num_digits: int,
-    seq_len: int,
-    train_count: int,
-    test_count: int,
-):
-    train_x_path = os.path.join(dataset_folder, "train.x.npy")
-    train_y_path = os.path.join(dataset_folder, "train.y.npy")
-    train_metadata_path = os.path.join(dataset_folder, "train.metadata")
-    test_x_path = os.path.join(dataset_folder, "test.x.npy")
-    test_y_path = os.path.join(dataset_folder, "test.y.npy")
-    test_metadata_path = os.path.join(dataset_folder, "test.metadata")
+def LoadCotMulSeqData(
+    dataset_folder: str, config: TokenConfig, num_digits: int, seq_len: int, data_count: int
+) -> tuple[jax.Array, jax.Array]:
+    x_path = os.path.join(dataset_folder, "data.x.npy")
+    y_path = os.path.join(dataset_folder, "data.y.npy")
+    metadata_path = os.path.join(dataset_folder, "data.metadata")
 
-    train_data = TryLoad(
-        train_x_path,
-        train_y_path,
-        train_metadata_path,
-        CotMulSeqDataMetaData(config, seq_len, train_count),
-        train_count,
+    data = TryLoad(
+        x_path,
+        y_path,
+        metadata_path,
+        data_count,
         config,
         seq_len,
     )
-    test_data = TryLoad(
-        test_x_path,
-        test_y_path,
-        test_metadata_path,
-        CotMulSeqDataMetaData(config, seq_len, test_count),
-        test_count,
-        config,
-        seq_len,
-    )
-    if train_data is not None and test_data is not None:
-        return train_data, test_data
+    if data is not None:
+        x, y = data
+        return x[:data_count], y[:data_count]
 
     def remove_if_exists(file_path: str):
         if os.path.exists(file_path):
@@ -158,39 +141,28 @@ def LoadCotMulSeqDataset(
 
     map(
         remove_if_exists,
-        [
-            train_x_path,
-            train_y_path,
-            train_metadata_path,
-            test_x_path,
-            test_y_path,
-            test_metadata_path,
-        ],
+        [x_path, y_path, metadata_path],
     )
 
     os.makedirs(os.path.dirname(dataset_folder), exist_ok=True)
 
-    if train_count + test_count > (10**num_digits) ** 2:
+    if data_count > (10**num_digits) ** 2:
         raise ValueError("train_count + test_count must be less than or equal to (10^num_digits)^2")
 
-    indices = np.random.choice((10**num_digits) ** 2, size=train_count + test_count, replace=False)
+    indices = np.random.choice((10**num_digits) ** 2, size=data_count, replace=False)
     rows = indices // (10**num_digits)
     cols = indices % (10**num_digits)
     nums = np.stack([rows, cols], axis=1)
 
-    x, y = BuildCotMulSeqData(config, num_digits, seq_len, nums)
-    jnp.save(train_x_path, x[:train_count])
-    jnp.save(train_y_path, y[:train_count])
-    with open(train_metadata_path, "wb") as f:
+    x, y = BuildCotMulSeqData(config, seq_len, nums)
+
+    os.makedirs(os.path.dirname(x_path), exist_ok=True)
+    os.makedirs(os.path.dirname(y_path), exist_ok=True)
+    jnp.save(x_path, x)
+    jnp.save(y_path, y)
+    with open(metadata_path, "wb") as f:
         pickle.dump(
-            CotMulSeqDataMetaData(token_config=config, seq_len=seq_len, data_count=train_count), f
+            CotMulSeqDataMetaData(token_config=config, seq_len=seq_len, data_count=data_count), f
         )
 
-    jnp.save(test_x_path, x[train_count:])
-    jnp.save(test_y_path, y[train_count:])
-    with open(test_metadata_path, "wb") as f:
-        pickle.dump(
-            CotMulSeqDataMetaData(token_config=config, seq_len=seq_len, data_count=test_count), f
-        )
-
-    return (x[:train_count], y[:train_count]), (x[train_count:], y[train_count:])
+    return x, y

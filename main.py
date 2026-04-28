@@ -272,6 +272,22 @@ def EnableJaxOptimization(precision: str = "float16"):
     jax.config.update("jax_default_matmul_precision", "tensorfloat32")
 
 
+def LoadCotMulSeqDataset(
+    token_config: TokenConfig, config
+) -> tuple[tuple[jax.Array, jax.Array], tuple[jax.Array, jax.Array]]:
+    x_data, y_data = cotmulseqdata.LoadCotMulSeqData(
+        "./cache/cotmulseqdata",
+        token_config,
+        config.num_digits,
+        config.seq_len,
+        config.trainset_size + config.testset_size,
+    )
+    return (x_data[: config.trainset_size], y_data[: config.trainset_size]), (
+        x_data[config.trainset_size :],
+        y_data[config.trainset_size :],
+    )
+
+
 def main(_):
     os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
 
@@ -299,14 +315,7 @@ def main(_):
     rngs = nnx.Rngs(config.seed)
 
     sys.stdout.write("Loading data\n")
-    (x_train, y_train), (x_test, y_test) = cotmulseqdata.LoadCotMulSeqDataset(
-        "./cache/cotmulseqdata",
-        token_config,
-        config.num_digits,
-        config.seq_len,
-        config.trainset_size,
-        config.testset_size,
-    )
+    (x_train, y_train), (x_test, y_test) = LoadCotMulSeqDataset(token_config, config)
 
     init_model = lambda: Transformer(
         num_embeddings=config.num_embeddings,
