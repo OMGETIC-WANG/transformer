@@ -191,6 +191,10 @@ class Transformer(nnx.Module):
         for decoder in self.decoders:
             decoder.attention.ResetKVCache()
 
+    def ReleaseKVCache(self):
+        for decoder in self.decoders:
+            decoder.attention.ReleaseKVCache()
+
     def Generate(self, x: jax.Array):
         self.eval()
         self.ResetKVCache()

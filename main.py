@@ -19,10 +19,6 @@ from ml_collections import config_flags
 from absl import app
 
 
-# Model_t = T.TypeVar("Model_t", bound=nnx.Module)
-Model_t = Transformer
-
-
 def BatchDatas(xs: T.Sequence[jax.Array], batch_size: int):
     dataset_size = xs[0].shape[0]
     batch_count = dataset_size // batch_size
@@ -37,13 +33,13 @@ def BatchDatas(xs: T.Sequence[jax.Array], batch_size: int):
 
 @nnx.jit
 def TrainBatch(
-    model_optimizer: tuple[Model_t, nnx.Optimizer[Model_t]],
+    model_optimizer: tuple[Transformer, nnx.Optimizer[Transformer]],
     x: jax.Array,
     y: jax.Array,
 ):
     model, optimzier = model_optimizer
 
-    def loss_fn(model: Model_t):
+    def loss_fn(model: Transformer):
         causal_mask = masks.CausalMask(y)
         padding_mask = masks.PaddingMask(y, model.token_config.padding_token)
         mask = causal_mask & padding_mask[..., None]
@@ -78,8 +74,8 @@ def TrainBatch(
 
 @nnx.jit(static_argnames=["batch_size"])
 def TrainModel(
-    model: Model_t,
-    optimizer: nnx.Optimizer[Model_t],
+    model: Transformer,
+    optimizer: nnx.Optimizer[Transformer],
     x: jax.Array,
     y: jax.Array,
     batch_size: int,
@@ -108,7 +104,7 @@ def TrainModel(
 
 @nnx.scan(in_axes=(None, 0, 0), out_axes=0)
 @nnx.jit
-def TestBatch(model: Model_t, x: jax.Array, y: jax.Array):
+def TestBatch(model: Transformer, x: jax.Array, y: jax.Array):
     pred = model.Generate(x)
 
     response_mask = masks.ResponseMask(x, y, model.token_config.padding_token)
@@ -126,7 +122,7 @@ def TestBatch(model: Model_t, x: jax.Array, y: jax.Array):
 
 
 @nnx.jit(static_argnames=["batch_size"])
-def TestModel(model: Model_t, x: jax.Array, y: jax.Array, batch_size: int):
+def TestModel(model: Transformer, x: jax.Array, y: jax.Array, batch_size: int):
     model.eval()
 
     x, y = BatchDatas((x, y), batch_size)
@@ -136,8 +132,8 @@ def TestModel(model: Model_t, x: jax.Array, y: jax.Array, batch_size: int):
 
 
 def Train(
-    model: Model_t,
-    optimizer: nnx.Optimizer[Model_t],
+    model: Transformer,
+    optimizer: nnx.Optimizer[Transformer],
     x: jax.Array,
     y: jax.Array,
     batch_size: int,
@@ -149,7 +145,6 @@ def Train(
     test_batch_size: int = -1,
     state_save_path: str = "",
     state_save_per_epoch: int = -1,
-    model_save_path: str = "",
     use_graphic: bool = True,
     eval_per_epoch: int = 1,
 ):
@@ -238,9 +233,6 @@ def Train(
         if dashboard is not None:
             dashboard.Update(loss_plot_dict)
 
-    if model_save_path != "":
-        model_serialization.SaveModel(model_save_path, model)
-
 
 def CountModuleParams(module: nnx.Module):
     params = nnx.state(module, nnx.Param)
@@ -320,7 +312,7 @@ def main(_):
         config.dataset_dir, token_config, config
     )
 
-    init_model = lambda: Transformer(
+    init_model_with_rngs = lambda rngs: Transformer(
         num_embeddings=config.num_embeddings,
         model_features=config.model_features,
         num_heads=config.num_heads,
@@ -333,12 +325,14 @@ def main(_):
         param_dtype=config.param_dtype,
         dtype=config.dtype,
     )
+    init_model = lambda: init_model_with_rngs(rngs)
+    init_model_abstract = lambda: init_model_with_rngs(nnx.Rngs(0))
 
     if not config.test_only:
         if config.use_training_model:
             model, optimizer = model_serialization.LoadTrainingState(
                 config.train_state_path,
-                init_model,
+                init_model_abstract,
                 lambda model: nnx.Optimizer(model, optax.adamw(0.001), wrt=nnx.Param),
             )
         else:
@@ -381,25 +375,28 @@ def main(_):
             test_batch_size=config.test_batch_size,
             state_save_path=config.train_state_path,
             state_save_per_epoch=config.state_save_per_epoch,
-            model_save_path=os.path.join(
-                config.model_save_dir, f"{time.time()}.{config.model_suffix}"
-            ),
             eval_per_epoch=config.eval_per_epoch,
             use_graphic=config.use_graphic,
         )
+        if config.model_save_dir != "":
+            model.ReleaseKVCache()
+            model_serialization.SaveModel(
+                os.path.join(config.model_save_dir, f"{time.time()}.{config.model_suffix}"),
+                model,
+            )
     else:
         model = model_serialization.LoadNewestModel(
             config.model_save_dir,
             config.model_suffix,
-            init_model,
+            init_model_abstract,
         )
-
-    sys.stdout.write("Start testing\n")
-    model.eval()
-    full_acc, token_acc, answer_acc = TestModel(model, x_test, y_test, config.test_batch_size)
-    sys.stdout.write(f"Test accuracy: {full_acc * 100:.4f}%\n")
-    sys.stdout.write(f"Test token accuracy: {token_acc * 100:.4f}%\n")
-    sys.stdout.write(f"Test answer accuracy: {answer_acc * 100:.4f}%\n")
+        model.InitKVCache(config.test_batch_size)
+        sys.stdout.write("Start testing\n")
+        model.eval()
+        full_acc, token_acc, answer_acc = TestModel(model, x_test, y_test, config.test_batch_size)
+        sys.stdout.write(f"Test accuracy: {full_acc * 100:.4f}%\n")
+        sys.stdout.write(f"Test token accuracy: {token_acc * 100:.4f}%\n")
+        sys.stdout.write(f"Test answer accuracy: {answer_acc * 100:.4f}%\n")
 
     if config.use_graphic:
         plt.ioff()
