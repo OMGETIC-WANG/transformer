@@ -48,6 +48,7 @@ def get_config():
     config.num_digits = 3
     config.trainset_size = 65536
     config.testset_size = 8192
+    config.res_seq_reverse = True
 
     # Model settings
     config.num_embeddings = 32

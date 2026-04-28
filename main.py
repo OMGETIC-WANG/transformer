@@ -281,6 +281,7 @@ def LoadCotMulSeqDataset(
         config.num_digits,
         config.seq_len,
         config.trainset_size + config.testset_size,
+        config.res_seq_reverse,
     )
     return (x_data[: config.trainset_size], y_data[: config.trainset_size]), (
         x_data[config.trainset_size :],

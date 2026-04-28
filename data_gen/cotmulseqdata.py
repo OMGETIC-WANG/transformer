@@ -11,6 +11,7 @@ class CotMulSeqDataMetaData(tp.NamedTuple):
     token_config: TokenConfig
     seq_len: int
     data_count: int
+    res_seq_reverse: bool = False
 
 
 def SplitNum(x: int) -> list[int]:
@@ -29,14 +30,15 @@ def SplitNum(x: int) -> list[int]:
     return res
 
 
-def ToList(x: int, config: TokenConfig) -> list[int]:
+def ToList(x: int, config: TokenConfig, reverse: bool = False) -> list[int]:
     if x == 0:
         return [config.zero_token]
     res = []
     while x > 0:
         res.append(config.zero_token + x % 10)
         x //= 10
-    res.reverse()
+    if not reverse:
+        res.reverse()
     return res
 
 
@@ -44,7 +46,9 @@ def PadSeq(seq: list[int], max_len: int, padding_token: int) -> list[int]:
     return seq + [padding_token] * (max_len - len(seq))
 
 
-def MakeSeq(max_len: int, a: int, b: int, config: TokenConfig) -> tuple[list[int], list[int]]:
+def MakeSeq(
+    max_len: int, a: int, b: int, config: TokenConfig, res_seq_reverse: bool
+) -> tuple[list[int], list[int]]:
     c = a * b
 
     res_x = [
@@ -66,7 +70,7 @@ def MakeSeq(max_len: int, a: int, b: int, config: TokenConfig) -> tuple[list[int
             config.mul_token,
             *ToList(b_splited[i], config),
             config.equal_token,
-            *ToList(a * b_splited[i], config),
+            *ToList(a * b_splited[i], config, reverse=res_seq_reverse),
         ])
     for i in range(len(parts)):
         res_y += parts[i]
@@ -76,7 +80,7 @@ def MakeSeq(max_len: int, a: int, b: int, config: TokenConfig) -> tuple[list[int
     res_y += [
         config.think_end_token,
         config.start_token,
-        *ToList(c, config),
+        *ToList(c, config, reverse=res_seq_reverse),
         config.end_token,
     ]
     return PadSeq(res_x, max_len, config.padding_token), PadSeq(
@@ -84,12 +88,12 @@ def MakeSeq(max_len: int, a: int, b: int, config: TokenConfig) -> tuple[list[int
     )
 
 
-def BuildCotMulSeqData(config: TokenConfig, seq_len: int, nums: np.ndarray):
+def BuildCotMulSeqData(config: TokenConfig, seq_len: int, nums: np.ndarray, res_seq_reverse: bool):
     x = np.full((nums.shape[0], seq_len), config.padding_token, dtype=np.int32)
     y = np.full((nums.shape[0], seq_len), config.padding_token, dtype=np.int32)
 
     for i in range(nums.shape[0]):
-        x[i], y[i] = MakeSeq(seq_len, nums[i, 0], nums[i, 1], config)
+        x[i], y[i] = MakeSeq(seq_len, nums[i, 0], nums[i, 1], config, res_seq_reverse)
 
     return jnp.array(x), jnp.array(y)
 
@@ -101,6 +105,7 @@ def TryLoad(
     data_count: int,
     config: TokenConfig,
     seq_len: int,
+    res_seq_reverse: bool,
 ):
     if os.path.exists(metadata_path) and os.path.exists(x_path) and os.path.exists(y_path):
         with open(metadata_path, "rb") as f:
@@ -109,6 +114,7 @@ def TryLoad(
             meta.token_config == config
             and meta.seq_len == seq_len
             and meta.data_count >= data_count
+            and meta.res_seq_reverse == res_seq_reverse
         ):
             x = jnp.load(x_path)
             y = jnp.load(y_path)
@@ -117,20 +123,21 @@ def TryLoad(
 
 
 def LoadCotMulSeqData(
-    dataset_folder: str, config: TokenConfig, num_digits: int, seq_len: int, data_count: int
+    dataset_folder: str,
+    config: TokenConfig,
+    num_digits: int,
+    seq_len: int,
+    data_count: int,
+    res_seq_reverse: bool,
 ) -> tuple[jax.Array, jax.Array]:
     x_path = os.path.join(dataset_folder, "data.x.npy")
     y_path = os.path.join(dataset_folder, "data.y.npy")
     metadata_path = os.path.join(dataset_folder, "data.metadata")
 
-    data = TryLoad(
-        x_path,
-        y_path,
-        metadata_path,
-        data_count,
-        config,
-        seq_len,
-    )
+    try:
+        data = TryLoad(x_path, y_path, metadata_path, data_count, config, seq_len, res_seq_reverse)
+    except Exception as e:
+        data = None
     if data is not None:
         x, y = data
         return x[:data_count], y[:data_count]
@@ -154,7 +161,7 @@ def LoadCotMulSeqData(
     cols = indices % (10**num_digits)
     nums = np.stack([rows, cols], axis=1)
 
-    x, y = BuildCotMulSeqData(config, seq_len, nums)
+    x, y = BuildCotMulSeqData(config, seq_len, nums, res_seq_reverse)
 
     os.makedirs(os.path.dirname(x_path), exist_ok=True)
     os.makedirs(os.path.dirname(y_path), exist_ok=True)
@@ -162,7 +169,13 @@ def LoadCotMulSeqData(
     jnp.save(y_path, y)
     with open(metadata_path, "wb") as f:
         pickle.dump(
-            CotMulSeqDataMetaData(token_config=config, seq_len=seq_len, data_count=data_count), f
+            CotMulSeqDataMetaData(
+                token_config=config,
+                seq_len=seq_len,
+                data_count=data_count,
+                res_seq_reverse=res_seq_reverse,
+            ),
+            f,
         )
 
     return x, y
