@@ -326,6 +326,7 @@ def main(_):
         max_seq_len=config.seq_len,
         rngs=rngs,
         token_config=token_config,
+        use_loop=config.use_loop,
         decoder_droprate=config.decoder_droprate,
         param_dtype=config.param_dtype,
         dtype=config.dtype,

@@ -137,6 +137,7 @@ class Transformer(nnx.Module):
         *,
         rngs: nnx.Rngs,
         token_config: TokenConfig,
+        use_loop: bool = False,
         decoder_droprate: float = 0.1,
         param_dtype: Dtype = jnp.float32,
         dtype: tp.Optional[Dtype] = None,
@@ -161,13 +162,15 @@ class Transformer(nnx.Module):
             param_dtype=param_dtype,
             dtype=dtype,
         )
-        self.decoders = nnx.List([init_decoder() for _ in range(num_decoders)])
-        # self.decoders = nnx.List[RoPETransformerBlock]()
-        # ignore = (nnx.LayerNorm, nnx.Dropout)
-        # for _ in range(num_decoders):
-        #     self.decoders.append(init_decoder())
-        #     self.decoders.append(init_decoder())
-        #     _LinkParams(self.decoders[-1], self.decoders[-2], ignore=ignore)
+        if not use_loop:
+            self.decoders = nnx.List([init_decoder() for _ in range(num_decoders)])
+        else:
+            self.decoders = nnx.List[RoPETransformerBlock]()
+            ignore = (nnx.LayerNorm, nnx.Dropout)
+            for _ in range(num_decoders):
+                self.decoders.append(init_decoder())
+                self.decoders.append(init_decoder())
+                _LinkParams(self.decoders[-1], self.decoders[-2], ignore=ignore)
 
         self.output_proj = nnx.Linear(
             model_features, num_embeddings, rngs=rngs, param_dtype=param_dtype, dtype=dtype

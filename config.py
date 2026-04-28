@@ -56,6 +56,7 @@ def get_config():
     config.num_heads = 8
     config.num_decoders = 8
     config.decoder_droprate = 0.4
+    config.use_loop = False
 
     config.use_graphic = True
 
