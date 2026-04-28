@@ -299,18 +299,12 @@ def main(_):
     rngs = nnx.Rngs(config.seed)
 
     sys.stdout.write("Loading data\n")
-    x_train, y_train = cotmulseqdata.LoadCotMulSeqData(
-        "./cache/cotmulseqdata/train",
+    (x_train, y_train), (x_test, y_test) = cotmulseqdata.LoadCotMulSeqDataset(
+        "./cache/cotmulseqdata",
         token_config,
         config.num_digits,
         config.seq_len,
         config.trainset_size,
-    )
-    x_test, y_test = cotmulseqdata.LoadCotMulSeqData(
-        "./cache/cotmulseqdata/test",
-        token_config,
-        config.num_digits,
-        config.seq_len,
         config.testset_size,
     )
 
