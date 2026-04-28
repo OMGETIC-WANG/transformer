@@ -24,7 +24,7 @@ def BatchDatas(xs: T.Sequence[jax.Array], batch_size: int):
     batch_count = dataset_size // batch_size
     if dataset_size % batch_size != 0:
         sys.stdout.write(
-            f"Warning: dataset size {dataset_size} % batch size {batch_size} != 0, {dataset_size % batch_size} data will not be trained\n"
+            f"Warning: dataset size {dataset_size} % batch size {batch_size} != 0, {dataset_size % batch_size} data will not be used\n"
         )
     return [
         x[: batch_count * batch_size].reshape(batch_count, batch_size, *x.shape[1:]) for x in xs
